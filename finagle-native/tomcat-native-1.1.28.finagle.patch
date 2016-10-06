@@ -33,7 +33,7 @@ index 2aa91e0..275a4d6 100644
      public static final int SSL_OP_NO_TICKET                        = 0x00004000;
  
      /* The next flag deliberately changes the ciphertest, this is a check
-@@ -352,4 +356,184 @@ public final class SSL {
+@@ -352,4 +356,186 @@ public final class SSL {
       * @return true if all SSL_OP_* are supported by OpenSSL library.
       */
      public static native boolean hasOp(int op);
@@ -213,6 +213,8 @@ index 2aa91e0..275a4d6 100644
 +     * @return
 +     */
 +    public static native String getNextProtoNegotiated(long ssl);
++
++    public static native void setVerify(long ssl, int level, int depth);
 +
 +    /*
 +     * End Twitter API Additions
@@ -397,7 +399,7 @@ new file mode 100644
 index 0000000..051c266
 --- /dev/null
 +++ b/jni/java/org/apache/tomcat/jni/ssl/OpenSSLEngine.java
-@@ -0,0 +1,711 @@
+@@ -0,0 +1,743 @@
 +package org.apache.tomcat.jni.ssl;
 +
 +import org.apache.tomcat.jni.SSL;
@@ -436,6 +438,14 @@ index 0000000..051c266
 +
 +    private static final String SSL_IGNORABLE_ERROR_PREFIX = "error:00000000:";
 +
++    enum ClientAuthMode {
++        NONE,
++        OPTIONAL,
++        REQUIRE,
++    }
++
++    private static final int VERIFY_DEPTH = 10;
++
 +    // OpenSSL state
 +    private long ssl;
 +    private long networkBIO;
@@ -454,6 +464,7 @@ index 0000000..051c266
 +    private boolean engineClosed = false;
 +
 +    private DirectBufferPool bufferPool;
++    private volatile ClientAuthMode clientAuth = ClientAuthMode.NONE;
 +
 +    public OpenSSLEngine(SSLContextHolder contextHolder, DirectBufferPool bufferPool) {
 +        this.bufferPool = bufferPool;
@@ -1078,20 +1089,43 @@ index 0000000..051c266
 +
 +    @Override
 +    public void setNeedClientAuth(boolean b) {
++        setClientAuth(b ? ClientAuthMode.REQUIRE : ClientAuthMode.NONE);
 +    }
 +
 +    @Override
 +    public boolean getNeedClientAuth() {
-+        return false;
++        return clientAuth == ClientAuthMode.REQUIRE;
 +    }
 +
 +    @Override
 +    public void setWantClientAuth(boolean b) {
++        setClientAuth(b ? ClientAuthMode.OPTIONAL : ClientAuthMode.NONE);
 +    }
 +
 +    @Override
 +    public boolean getWantClientAuth() {
-+        return false;
++        return clientAuth == ClientAuthMode.OPTIONAL;
++    }
++
++    private void setClientAuth(ClientAuthMode mode) {
++        synchronized (this) {
++            if (clientAuth == mode) {
++                // No need to issue any JNI calls if the mode is the same
++                return;
++            }
++            switch (mode) {
++                case NONE:
++                    SSL.setVerify(ssl, SSL.SSL_CVERIFY_NONE, VERIFY_DEPTH);
++                    break;
++                case REQUIRE:
++                    SSL.setVerify(ssl, SSL.SSL_CVERIFY_REQUIRE, VERIFY_DEPTH);
++                    break;
++                case OPTIONAL:
++                    SSL.setVerify(ssl, SSL.SSL_CVERIFY_OPTIONAL, VERIFY_DEPTH);
++                    break;
++            }
++            clientAuth = mode;
++        }
 +    }
 +
 +    @Override
